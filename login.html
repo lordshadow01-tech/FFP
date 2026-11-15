@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Login · FF PAYALUGA</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="login">
+  <canvas id="particles"></canvas>
+  <div class="scanline"></div>
+  <main class="screen">
+    <form class="card hud" id="authForm" novalidate autocomplete="on">
+      <h1 class="title">FF PAYALUGA</h1>
+      <p class="sub">Sign in to your squad</p>
+      <label>Username<input id="username" name="username" autocomplete="username" maxlength="16" required></label>
+      <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required></label>
+      <p class="msg" id="msg" role="alert"></p>
+      <button class="btn" id="submitBtn" type="submit">Login</button>
+      <p class="alt">New member? <a href="register.html">Register</a></p>
+    </form>
+  </main>
+  <script type="module" src="script.js"></script>
+</body>
+</html>
