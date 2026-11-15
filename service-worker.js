@@ -1,5 +1,5 @@
 // Cache-first app shell so the app opens offline. Bump VERSION on every release.
-const VERSION = "ffp-v1.3";
+const VERSION = "ffp-v1.4";
 const SHELL = ["./", "index.html", "login.html", "register.html", "dashboard.html", "dashboard.js", "style.css", "script.js",
   "manifest.json", "firebase-config.js", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
 

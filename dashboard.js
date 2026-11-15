@@ -1,7 +1,7 @@
 // FF PAYALUGA dashboard: presence, alarms, responses, members, announcements, notifications.
 import { auth, db } from "./firebase-config.js";
 import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, orderBy, limit, onSnapshot, serverTimestamp, Timestamp }
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, orderBy, limit, onSnapshot, getDocs, where, serverTimestamp, Timestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
 const VAPID_KEY = "YOUR_WEB_PUSH_KEY"; // Firebase Console > Project settings > Cloud Messaging > Web push certificates
@@ -19,6 +19,11 @@ const h = (tag, attrs = {}, ...kids) => {
 let me, members = [], alarms = [], news = [], editing = null, alarmSound = null, audioEl = null, phones = {}, phonesOn = false;
 const responses = {}, subscribed = new Set(), dismissed = new Set();
 const isAdmin = () => me?.role === "admin";
+// Members may create alarms only when the admin gave them a daily limit (alarmLimit 1-20)
+const myLimit = () => Number(members.find(m => m.uid === me?.uid)?.alarmLimit ?? me?.alarmLimit ?? 0);
+const canCreate = () => isAdmin() || myLimit() > 0;
+const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const usedToday = () => alarms.filter(a => a.creatorUid === me.uid && a.createdAt?.toMillis?.() >= startOfToday()).length;
 const isOnline = m => m.lastSeen?.toMillis && Date.now() - m.lastSeen.toMillis() < ONLINE_MS;
 const lastSeen = m => !m.lastSeen?.toMillis ? "never" : (d => (d.toDateString() === new Date().toDateString() ? "today " : d.toLocaleDateString() + " ") + hm(d))(m.lastSeen.toDate());
 
@@ -103,6 +108,8 @@ $("bComing").onclick = () => respond("coming"); $("bVarala").onclick = () => res
 /* ---- Rendering ---- */
 function renderAll() {
   $("soundAdmin").hidden = !isAdmin();
+  $("alarmForm").hidden = !canCreate(); $("newsForm").hidden = !isAdmin();
+  $("limitNote").textContent = !isAdmin() && canCreate() ? `Your daily limit: ${usedToday()} / ${myLimit()} used today` : "";
   if (isAdmin() && !phonesOn) { // phone numbers are readable by the admin only
     phonesOn = true;
     onSnapshot(collection(db, "phones"), s => { phones = Object.fromEntries(s.docs.map(d => [d.id, d.data().phone])); renderMembers(); });
@@ -142,8 +149,11 @@ function renderMembers() {
     const row = h("div", { class: "row" }, h("div", { class: "top" }, h("span", { class: "dot" + (isOnline(m) ? " on" : "") }), h("b", {}, m.username), h("span", { class: "badge" }, m.role)),
       h("div", { class: "sub" }, isOnline(m) ? "Online" : "Last seen " + lastSeen(m)));
     if (isAdmin() && phones[m.uid]) row.append(h("a", { class: "sub", href: "tel:" + phones[m.uid] }, "📞 " + phones[m.uid]));
+    if (isAdmin() && m.role !== "admin") row.append(h("label", { class: "limit" }, "Alarms per day",
+      h("select", { onchange: e => updateDoc(doc(db, "users", m.uid), { alarmLimit: Number(e.target.value) }) },
+        ...Array.from({ length: 21 }, (_, n) => h("option", n === Number(m.alarmLimit || 0) ? { value: n, selected: "" } : { value: n }, n ? String(n) : "Off")))));
     if (isAdmin() && m.uid !== me.uid) row.append(h("div", { class: "mini" },
-      h("button", { onclick: () => updateDoc(doc(db, "users", m.uid), { role: m.role === "admin" ? "member" : "admin" }) }, m.role === "admin" ? "Make member" : "Make admin"),
+      h("button", { onclick: () => { if (m.role !== "admin" && prompt("Enter passcode to make admin") !== "4047") return alert("Wrong passcode"); updateDoc(doc(db, "users", m.uid), { role: m.role === "admin" ? "member" : "admin" }); } }, m.role === "admin" ? "Make member" : "Make admin"),
       h("button", { onclick: () => confirm("Remove " + m.username + "?") && Promise.all([deleteDoc(doc(db, "users", m.uid)), deleteDoc(doc(db, "phones", m.uid))]).catch(() => {}) }, "Remove")));
     return row;
   }));
@@ -175,14 +185,19 @@ function editAlarm(a) { editing = a.id; $("formTitle").textContent = "Edit alarm
 function resetForm() { editing = null; $("alarmForm").reset(); $("formTitle").textContent = "Create alarm"; $("aCancel").hidden = true; }
 $("aCancel").onclick = resetForm;
 $("alarmForm").onsubmit = async e => {
-  e.preventDefault(); if (!isAdmin()) return;
+  e.preventDefault(); if (!canCreate()) return;
   const title = $("aTitle").value.trim(), t = $("aTime").value, desc = $("aDesc").value.trim();
   if (!title || title.length > 40) return ($("aMsg").textContent = "Title: 1–40 characters.");
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) return ($("aMsg").textContent = "Pick a time in 24h format.");
   const at = new Date(); const [H, M] = t.split(":").map(Number); at.setHours(H, M, 0, 0); if (at <= new Date() && !editing) at.setDate(at.getDate() + 1);
   const data = { title, description: desc.slice(0, 120), at: Timestamp.fromDate(at), creator: me.username, notified: false };
-  try { editing ? await updateDoc(doc(db, "alarms", editing), data) : await addDoc(collection(db, "alarms"), { ...data, createdAt: serverTimestamp() }); resetForm(); $("aMsg").textContent = ""; }
-  catch { $("aMsg").textContent = "Could not save. Admin only."; }
+  if (!isAdmin()) { // re-count from the server so the limit can't be dodged by a stale screen
+    const snap = await getDocs(query(collection(db, "alarms"), where("creatorUid", "==", me.uid)));
+    const used = snap.docs.filter(d => d.data().createdAt?.toMillis?.() >= startOfToday()).length;
+    if (used >= myLimit()) return ($("aMsg").textContent = `Daily limit reached (${used}/${myLimit()}).`);
+  }
+  try { editing ? await updateDoc(doc(db, "alarms", editing), data) : await addDoc(collection(db, "alarms"), { ...data, createdAt: serverTimestamp(), creatorUid: me.uid }); resetForm(); $("aMsg").textContent = ""; }
+  catch { $("aMsg").textContent = "Could not save. Ask the admin for permission."; }
 };
 $("newsForm").onsubmit = async e => {
   e.preventDefault(); const text = $("nText").value.trim(); if (!text || text.length > 200) return;
