@@ -53,6 +53,7 @@ function start() {
   onSnapshot(query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(20)), s => { news = s.docs.map(d => ({ id: d.id, ...d.data() })); renderAll(); });
   onSnapshot(doc(db, "config", "alarm"), s => { alarmSound = s.exists() ? s.data() : null; $("soundName").textContent = alarmSound?.name || "Default beep"; });
   getDoc(doc(db, "phones", me.uid)).then(s => s.exists() && ($("phoneIn").value = s.data().phone)).catch(() => {});
+  checkGate();
   setInterval(tick, 1000); tick();
 }
 const beat = () => updateDoc(doc(db, "users", me.uid), { lastSeen: serverTimestamp() }).catch(() => {});
@@ -66,7 +67,7 @@ function tick() {
 }
 
 /* ---- Ringing screen: only COMING / VARALA ---- */
-let ac, beepTimer, ringing = null, soundName = "classic";
+let ac, beepTimer, ringing = null, soundName = "classic", wake = null;
 /* Alarm sounds are generated in the browser, so no audio files are needed. Admin picks one for everybody. */
 function tone(f, t0, d, type = "square", g = .25, f2 = f) {
   const o = ac.createOscillator(), v = ac.createGain(), t = ac.currentTime + t0;
@@ -93,12 +94,15 @@ function playSound() { audioEl?.pause(); audioEl = new Audio(alarmSound.data); a
 function stopSound() { audioEl?.pause(); audioEl = null; }
 function ring(a) {
   if (ringing === a.id) return; ringing = a.id;
-  $("ringTitle").textContent = a.title; $("ringDesc").textContent = (a.description || "") + " · " + hm(a.at.toDate());
+  $("ringTitle").textContent = a.title; $("ringDesc").textContent = [a.description, hm(a.at.toDate()), a.creator && "by " + a.creator].filter(Boolean).join(" · ");
   $("ring").hidden = false;
+  // App in background: pop a notification too, and keep the screen on while ringing
+  if (document.hidden && "Notification" in window && Notification.permission === "granted") navigator.serviceWorker.ready.then(r => r.showNotification("⏰ " + a.title, { body: [a.description, hm(a.at.toDate())].filter(Boolean).join(" · "), tag: a.id, requireInteraction: true, vibrate: [500, 250, 500, 250, 500], icon: "icon-192.png", data: { url: "dashboard.html" } })).catch(() => {});
+  navigator.wakeLock?.request("screen").then(l => (wake = l)).catch(() => {});
   alarmSound?.data ? playSound() : (() => { try { beep(); } catch {} })();
   beepTimer = setInterval(() => { if (!alarmSound?.data) { try { beep(); } catch {} } navigator.vibrate?.([300, 150, 300]); }, 900);
 }
-function stopRing() { if (!ringing) return; ringing = null; clearInterval(beepTimer); stopSound(); $("ring").hidden = true; }
+function stopRing() { if (!ringing) return; ringing = null; clearInterval(beepTimer); stopSound(); wake?.release?.(); wake = null; $("ring").hidden = true; }
 async function respond(kind) {
   const id = ringing; if (!id) return; dismissed.add(id); stopRing();
   await setDoc(doc(db, "alarms", id, "responses", me.uid), { username: me.username, response: kind, respondedAt: serverTimestamp(), status: "responded" });
@@ -239,16 +243,34 @@ $("phoneBtn").onclick = async () => {
   try { await setDoc(doc(db, "phones", me.uid), { phone: p, username: me.username, updatedAt: serverTimestamp() }); $("sMsg").textContent = "Number saved."; }
   catch { $("sMsg").textContent = "Could not save the number."; }
 };
+async function enableNotifications() { // asks permission, then saves this phone's push token
+  if ((await Notification.requestPermission()) !== "granted") throw new Error("denied");
+  const { getMessaging, getToken } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js");
+  const { getApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
+  await navigator.serviceWorker.register("service-worker.js");
+  const reg = await navigator.serviceWorker.ready;
+  const token = await getToken(getMessaging(getApp()), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
+  await updateDoc(doc(db, "users", me.uid), { fcmToken: token });
+}
 $("notifBtn").onclick = async () => {
-  try {
-    if (await Notification.requestPermission() !== "granted") return ($("sMsg").textContent = "Notification permission denied.");
-    const { getMessaging, getToken } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js");
-    const { getApp } = await import("https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js");
-    const reg = await navigator.serviceWorker.register("firebase-messaging-sw.js");
-    const token = await getToken(getMessaging(getApp()), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
-    await updateDoc(doc(db, "users", me.uid), { fcmToken: token }); $("sMsg").textContent = "Notifications enabled.";
-  } catch { $("sMsg").textContent = "Could not enable notifications. Check the VAPID key."; }
+  try { await enableNotifications(); $("sMsg").textContent = "Notifications enabled."; }
+  catch { $("sMsg").textContent = "Could not enable notifications. Check the permission."; }
 };
+/* ---- Gate: nobody sees the app until notifications are allowed ---- */
+let tokenDone = false;
+const needsGate = () => "Notification" in window && Notification.permission !== "granted";
+function checkGate() {
+  const need = needsGate(); $("gate").hidden = !need;
+  if (!need && !tokenDone) { tokenDone = true; enableNotifications().catch(() => { tokenDone = false; }); } // refresh this phone's token quietly
+}
+$("gateBtn").onclick = async () => {
+  $("gateMsg").textContent = "";
+  try { await enableNotifications(); }
+  catch { $("gateMsg").textContent = Notification.permission === "denied" ? "Blocked. Chrome menu ⋮ > Site settings > Notifications > Allow, then tap again." : "Could not enable. Try again."; }
+  checkGate();
+};
+$("gateOut").onclick = async () => { await signOut(auth); location.replace("login.html"); };
+document.addEventListener("visibilitychange", () => !document.hidden && checkGate());
 let installEvt; addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; $("installBtn").hidden = false; });
 $("installBtn").onclick = async () => { installEvt?.prompt(); installEvt = null; $("installBtn").hidden = true; };
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("service-worker.js");
