@@ -72,6 +72,8 @@ function register() {
     e.preventDefault();
     const code = $("invite").value.trim(), name = $("username").value.trim();
     const pass = $("password").value, confirm = $("confirm").value;
+    const phone = ($("phone").value || "").replace(/[\s-]/g, "");
+    if (phone && !/^\+?\d{10,13}$/.test(phone)) return say("Mobile number looks wrong.");
     if (code !== INVITE_CODE) return say("Wrong invite code.");
     if (!USERNAME_RE.test(name)) return say("Username: 3–16 letters, numbers or _.");
     if (pass.length < 6) return say("Password needs 6+ characters.");
@@ -81,6 +83,8 @@ function register() {
       const cred = await createUserWithEmailAndPassword(auth, toEmail(name), pass);
       // New accounts are always "member"; promote the admin by hand in the Firebase console.
       await setDoc(doc(db, "users", cred.user.uid), { username: name, role: "member", invite: code, createdAt: serverTimestamp() });
+      // Phone goes in its own private doc: only the owner and the admin can read it
+      if (phone) await setDoc(doc(db, "phones", cred.user.uid), { phone, username: name, updatedAt: serverTimestamp() }).catch(() => {});
       say("Account created!", true); setTimeout(() => location.replace("dashboard.html"), 700);
     } catch (err) { say(friendlyError(err)); busy(false, "Create account"); }
   });

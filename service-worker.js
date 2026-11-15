@@ -1,7 +1,7 @@
 // Cache-first app shell so the app opens offline. Bump VERSION on every release.
-const VERSION = "ffp-v1.0";
+const VERSION = "ffp-v1.3";
 const SHELL = ["./", "index.html", "login.html", "register.html", "dashboard.html", "dashboard.js", "style.css", "script.js",
-  "manifest.json", "firebase-config.js", "icon.svg"];
+  "manifest.json", "firebase-config.js", "icon-192.png", "icon-512.png", "icon-maskable-512.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)));
@@ -14,9 +14,9 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return; // Firebase calls go direct
-  e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(res => {
+  e.respondWith(fetch(e.request).then(res => {
     const copy = res.clone();
     caches.open(VERSION).then(c => c.put(e.request, copy));
     return res;
-  }).catch(() => caches.match("index.html"))));
+  }).catch(() => caches.match(e.request).then(hit => hit || caches.match("index.html"))));
 });

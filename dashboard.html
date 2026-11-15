@@ -6,7 +6,8 @@
   <meta name="theme-color" content="#000000">
   <title>FF PAYALUGA</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="icon" href="icon.svg">
+  <link rel="icon" href="icon-192.png">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -23,6 +24,7 @@
       <div class="card hud center"><div class="clock" id="clock">--:--:--</div><p class="sub" id="onlineCount"></p></div>
       <div class="card hud"><h2>Next alarm</h2><div id="nextAlarm" class="sub">No alarm set</div></div>
       <div class="stats" id="stats"></div>
+      <div id="replies" class="list"></div>
       <div class="card"><h2>Latest announcement</h2><div id="latestNews" class="sub">Nothing yet</div></div>
     </section>
     <section class="view" id="v-alarms" hidden>
@@ -40,6 +42,7 @@
     </section>
     <section class="view" id="v-members" hidden><div id="memberList" class="list"></div></section>
     <section class="view" id="v-news" hidden>
+      <div id="newsReplies" class="list"></div>
       <form class="card" id="newsForm" hidden novalidate>
         <label>Announcement<input id="nText" maxlength="200" required></label>
         <button class="btn" type="submit">Post</button>
@@ -48,10 +51,30 @@
     </section>
     <section class="view" id="v-settings" hidden>
       <div class="card hud">
+        <h2>Alarm sound</h2>
+        <p class="sub" id="soundName">Default beep</p>
+        <div id="soundAdmin" hidden>
+          <input id="soundFile" type="file" accept="audio/*" hidden>
+          <button class="btn" id="pickSound" type="button">Choose song from phone</button>
+          <button class="btn ghost" id="resetSound" type="button">Use default beep</button>
+        </div>
+      </div>
+      <div class="card hud">
         <button class="btn" id="notifBtn" type="button">Enable alarm notifications</button>
-        <button class="btn ghost" id="soundBtn" type="button">Test alarm sound</button>
         <button class="btn ghost" id="installBtn" type="button" hidden>Install app</button>
         <p class="msg" id="sMsg"></p>
+      </div>
+      <div class="card">
+        <h2>My mobile number</h2>
+        <input id="phoneIn" type="tel" inputmode="tel" maxlength="15" placeholder="10-digit number">
+        <button class="btn" id="phoneBtn" type="button">Save number</button>
+        <p class="sub">Only the admin can see this.</p>
+      </div>
+      <div class="card hud">
+        <h2>Alarm sound</h2>
+        <select id="soundSel" aria-label="Alarm sound"></select>
+        <p class="sub" id="soundNote"></p>
+        <button class="btn ghost" id="soundBtn" type="button">Test alarm sound</button>
       </div>
     </section>
   </main>

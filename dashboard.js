@@ -16,7 +16,7 @@ const h = (tag, attrs = {}, ...kids) => {
   e.append(...kids); return e;
 };
 
-let me, members = [], alarms = [], news = [], editing = null;
+let me, members = [], alarms = [], news = [], editing = null, alarmSound = null, audioEl = null, phones = {}, phonesOn = false;
 const responses = {}, subscribed = new Set(), dismissed = new Set();
 const isAdmin = () => me?.role === "admin";
 const isOnline = m => m.lastSeen?.toMillis && Date.now() - m.lastSeen.toMillis() < ONLINE_MS;
@@ -44,7 +44,10 @@ function start() {
     });
     renderAll();
   });
+  onSnapshot(doc(db, "settings", "alarm"), s => { soundName = s.data()?.sound || "classic"; renderSound(); });
   onSnapshot(query(collection(db, "announcements"), orderBy("createdAt", "desc"), limit(20)), s => { news = s.docs.map(d => ({ id: d.id, ...d.data() })); renderAll(); });
+  onSnapshot(doc(db, "config", "alarm"), s => { alarmSound = s.exists() ? s.data() : null; $("soundName").textContent = alarmSound?.name || "Default beep"; });
+  getDoc(doc(db, "phones", me.uid)).then(s => s.exists() && ($("phoneIn").value = s.data().phone)).catch(() => {});
   setInterval(tick, 1000); tick();
 }
 const beat = () => updateDoc(doc(db, "users", me.uid), { lastSeen: serverTimestamp() }).catch(() => {});
@@ -58,16 +61,39 @@ function tick() {
 }
 
 /* ---- Ringing screen: only COMING / VARALA ---- */
-let ac, beepTimer, ringing = null;
-function beep() { ac ??= new AudioContext(); ac.resume(); const o = ac.createOscillator(), g = ac.createGain(); o.type = "square"; o.frequency.value = 880; g.gain.value = .25; o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + .25); }
+let ac, beepTimer, ringing = null, soundName = "classic";
+/* Alarm sounds are generated in the browser, so no audio files are needed. Admin picks one for everybody. */
+function tone(f, t0, d, type = "square", g = .25, f2 = f) {
+  const o = ac.createOscillator(), v = ac.createGain(), t = ac.currentTime + t0;
+  o.type = type; o.frequency.setValueAtTime(f, t); o.frequency.linearRampToValueAtTime(f2, t + d);
+  v.gain.value = g; o.connect(v).connect(ac.destination); o.start(t); o.stop(t + d);
+}
+const SOUNDS = {
+  classic: { label: "Classic beep", play: () => tone(880, 0, .25) },
+  siren: { label: "Siren", play: () => { tone(600, 0, .45, "sawtooth", .2, 1200); tone(1200, .45, .45, "sawtooth", .2, 600); } },
+  digital: { label: "Digital triple", play: () => [0, .15, .3].forEach(t => tone(1400, t, .1, "square", .2)) },
+  alert: { label: "Game alert", play: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, i * .15, .14, "triangle", .35)) },
+  pulse: { label: "Deep pulse", play: () => { tone(220, 0, .35, "sawtooth", .3); tone(330, .4, .35, "sawtooth", .3); } }
+};
+function beep() { ac ??= new AudioContext(); ac.resume(); (SOUNDS[soundName] || SOUNDS.classic).play(); }
+function renderSound() {
+  const sel = $("soundSel");
+  if (!sel.options.length) sel.replaceChildren(...Object.entries(SOUNDS).map(([k, v]) => h("option", { value: k }, v.label)));
+  sel.value = soundName; sel.disabled = !isAdmin();
+  $("soundNote").textContent = isAdmin() ? "Your choice rings for every member." : "Only the admin can change this.";
+}
+$("soundSel").onchange = () => setDoc(doc(db, "settings", "alarm"), { sound: $("soundSel").value, by: me.username }, { merge: true }).catch(() => ($("sMsg").textContent = "Only admin can change the sound."));
+// Custom alarm sound chosen by the admin (stored in Firestore, same for everyone)
+function playSound() { audioEl?.pause(); audioEl = new Audio(alarmSound.data); audioEl.loop = true; audioEl.play().catch(() => {}); }
+function stopSound() { audioEl?.pause(); audioEl = null; }
 function ring(a) {
   if (ringing === a.id) return; ringing = a.id;
   $("ringTitle").textContent = a.title; $("ringDesc").textContent = (a.description || "") + " · " + hm(a.at.toDate());
   $("ring").hidden = false;
-  try { beep(); } catch {}
-  beepTimer = setInterval(() => { try { beep(); } catch {} navigator.vibrate?.([300, 150, 300]); }, 900);
+  alarmSound?.data ? playSound() : (() => { try { beep(); } catch {} })();
+  beepTimer = setInterval(() => { if (!alarmSound?.data) { try { beep(); } catch {} } navigator.vibrate?.([300, 150, 300]); }, 900);
 }
-function stopRing() { if (!ringing) return; ringing = null; clearInterval(beepTimer); $("ring").hidden = true; }
+function stopRing() { if (!ringing) return; ringing = null; clearInterval(beepTimer); stopSound(); $("ring").hidden = true; }
 async function respond(kind) {
   const id = ringing; if (!id) return; dismissed.add(id); stopRing();
   await setDoc(doc(db, "alarms", id, "responses", me.uid), { username: me.username, response: kind, respondedAt: serverTimestamp(), status: "responded" });
@@ -75,7 +101,21 @@ async function respond(kind) {
 $("bComing").onclick = () => respond("coming"); $("bVarala").onclick = () => respond("varala");
 
 /* ---- Rendering ---- */
-function renderAll() { renderHome(); renderAlarms(); renderMembers(); renderNews(); renderMenu(); }
+function renderAll() {
+  $("soundAdmin").hidden = !isAdmin();
+  if (isAdmin() && !phonesOn) { // phone numbers are readable by the admin only
+    phonesOn = true;
+    onSnapshot(collection(db, "phones"), s => { phones = Object.fromEntries(s.docs.map(d => [d.id, d.data().phone])); renderMembers(); });
+  }
+  renderSound(); renderHome(); renderAlarms(); renderMembers(); renderNews(); renderMenu(); renderReplies(); }
+// Who is coming / varala for the current (or next) alarm, shown on Home and News
+function renderReplies() {
+  const now = Date.now();
+  const a = alarms.find(x => x.at.toMillis() <= now && now - x.at.toMillis() < 3600000) || alarms.filter(x => x.at.toMillis() > now).sort((p, q) => p.at - q.at)[0];
+  const build = () => !a ? [] : [h("div", { class: "row" }, h("div", { class: "top" }, h("b", {}, `${a.title} · ${hm(a.at.toDate())}`), h("span", { class: "badge" }, "Replies")),
+    ...members.map(m => { const r = responses[a.id]?.[m.uid]?.response; return h("div", {}, `${m.username} — `, h("b", {}, r === "coming" ? "Coming" : r === "varala" ? "Varala" : "Pending")); }))];
+  $("replies").replaceChildren(...build()); $("newsReplies").replaceChildren(...build());
+}
 function renderHome() {
   const on = members.filter(isOnline).length;
   $("onlineCount").textContent = `Online ${on} · Offline ${members.length - on}`;
@@ -101,9 +141,10 @@ function renderMembers() {
   $("memberList").replaceChildren(...[...members].sort((a, b) => isOnline(b) - isOnline(a)).map(m => {
     const row = h("div", { class: "row" }, h("div", { class: "top" }, h("span", { class: "dot" + (isOnline(m) ? " on" : "") }), h("b", {}, m.username), h("span", { class: "badge" }, m.role)),
       h("div", { class: "sub" }, isOnline(m) ? "Online" : "Last seen " + lastSeen(m)));
+    if (isAdmin() && phones[m.uid]) row.append(h("a", { class: "sub", href: "tel:" + phones[m.uid] }, "📞 " + phones[m.uid]));
     if (isAdmin() && m.uid !== me.uid) row.append(h("div", { class: "mini" },
       h("button", { onclick: () => updateDoc(doc(db, "users", m.uid), { role: m.role === "admin" ? "member" : "admin" }) }, m.role === "admin" ? "Make member" : "Make admin"),
-      h("button", { onclick: () => confirm("Remove " + m.username + "?") && deleteDoc(doc(db, "users", m.uid)) }, "Remove")));
+      h("button", { onclick: () => confirm("Remove " + m.username + "?") && Promise.all([deleteDoc(doc(db, "users", m.uid)), deleteDoc(doc(db, "phones", m.uid))]).catch(() => {}) }, "Remove")));
     return row;
   }));
 }
@@ -149,7 +190,40 @@ $("newsForm").onsubmit = async e => {
 };
 
 /* ---- Settings: push notifications, sound test, install ---- */
-$("soundBtn").onclick = () => { try { beep(); navigator.vibrate?.(300); } catch {} };
+$("soundBtn").onclick = () => { if (alarmSound?.data) { playSound(); setTimeout(stopSound, 5000); } else { try { beep(); navigator.vibrate?.(300); } catch {} } };
+
+// Turn any song into a short mono WAV (first 15 s) so it fits in one Firestore document
+async function toWavDataUrl(file) {
+  const dec = await new (window.AudioContext || window.webkitAudioContext)().decodeAudioData(await file.arrayBuffer());
+  const rate = 16000, len = Math.floor(rate * Math.min(15, dec.duration));
+  const off = new OfflineAudioContext(1, len, rate), src = off.createBufferSource();
+  src.buffer = dec; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const wav = new DataView(new ArrayBuffer(44 + len * 2)), w = (o, t) => [...t].forEach((c, i) => wav.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); wav.setUint32(4, 36 + len * 2, true); w(8, "WAVEfmt "); wav.setUint32(16, 16, true); wav.setUint16(20, 1, true); wav.setUint16(22, 1, true);
+  wav.setUint32(24, rate, true); wav.setUint32(28, rate * 2, true); wav.setUint16(32, 2, true); wav.setUint16(34, 16, true); w(36, "data"); wav.setUint32(40, len * 2, true);
+  for (let i = 0; i < len; i++) wav.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  const bytes = new Uint8Array(wav.buffer); let bin = "";
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return "data:audio/wav;base64," + btoa(bin);
+}
+$("pickSound").onclick = () => $("soundFile").click();
+$("soundFile").onchange = async e => {
+  const f = e.target.files[0]; if (!f || !isAdmin()) return;
+  $("sMsg").textContent = "Processing song…";
+  try {
+    await setDoc(doc(db, "config", "alarm"), { name: f.name.slice(0, 60), data: await toWavDataUrl(f), by: me.username, updatedAt: serverTimestamp() });
+    $("sMsg").textContent = "Alarm sound updated for everyone.";
+  } catch { $("sMsg").textContent = "Could not use that file. Try another song."; }
+  e.target.value = "";
+};
+$("resetSound").onclick = () => deleteDoc(doc(db, "config", "alarm")).then(() => ($("sMsg").textContent = "Back to default beep."));
+$("phoneBtn").onclick = async () => {
+  const p = $("phoneIn").value.replace(/[\s-]/g, "");
+  if (!/^\+?\d{10,13}$/.test(p)) return ($("sMsg").textContent = "Enter a valid mobile number.");
+  try { await setDoc(doc(db, "phones", me.uid), { phone: p, username: me.username, updatedAt: serverTimestamp() }); $("sMsg").textContent = "Number saved."; }
+  catch { $("sMsg").textContent = "Could not save the number."; }
+};
 $("notifBtn").onclick = async () => {
   try {
     if (await Notification.requestPermission() !== "granted") return ($("sMsg").textContent = "Notification permission denied.");
