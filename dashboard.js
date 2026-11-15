@@ -4,7 +4,7 @@ import { onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/
 import { doc, getDoc, setDoc, updateDoc, deleteDoc, addDoc, collection, query, orderBy, limit, onSnapshot, getDocs, where, serverTimestamp, Timestamp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-const VAPID_KEY = "YOUR_WEB_PUSH_KEY"; // Firebase Console > Project settings > Cloud Messaging > Web push certificates
+const VAPID_KEY = "BEsmov8HdLo4LJaKi4eS1gjvfwI_OBIH2QqsK928z0eczk8OuLf1fwSIst8XWehwDU8RXwTa9Gvvz6cJ388rGdg"; // Firebase Console > Project settings > Cloud Messaging > Web push certificates
 const ONLINE_MS = 75000;
 const $ = id => document.getElementById(id);
 const pad = n => String(n).padStart(2, "0");
