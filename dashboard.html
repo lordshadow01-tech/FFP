@@ -85,8 +85,18 @@
   </nav>
   <div class="ring" id="ring" hidden>
     <div class="radar"><span class="radar-sweep"></span><span class="radar-ring r1"></span><span class="radar-dot"></span></div>
-    <h2 class="logo" id="ringTitle"></h2><p class="sub" id="ringDesc"></p>
+    <p class="ring-label">⏰ ALARM</p>
+    <h2 class="ring-title" id="ringTitle"></h2><p class="ring-desc" id="ringDesc"></p>
     <div class="two"><button class="btn" id="bComing">COMING</button><button class="btn warn" id="bVarala">VARALA</button></div>
+  </div>
+  <div class="gate" id="gate" hidden>
+    <div class="card hud center">
+      <h2>Enable notifications</h2>
+      <p class="sub">FF PAYALUGA needs notifications so the squad alarm can reach you. Allow them to continue.</p>
+      <button class="btn" id="gateBtn" type="button">Enable notifications</button>
+      <p class="msg" id="gateMsg" role="alert"></p>
+      <button class="btn ghost" id="gateOut" type="button">Logout</button>
+    </div>
   </div>
   <script type="module" src="dashboard.js"></script>
 </body>

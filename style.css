@@ -102,3 +102,15 @@ h2 { font: 600 1.05rem "Orbitron", sans-serif; color: var(--purple); margin-bott
 select { width: 100%; padding: 13px 14px; font: inherit; color: var(--white); background: rgba(0,0,0,.6); border: 1px solid var(--line); border-radius: 4px; }
 select:disabled { opacity: .6; }
 a.sub { color: var(--cyan); text-decoration: none; }
+.limit { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.limit select { width: auto; min-width: 90px; }
+.gate { position: fixed; inset: 0; z-index: 30; background: #000; display: grid; place-items: center; padding: 20px; }
+.gate .card { width: min(100%, 380px); }
+
+/* Ringing screen: the alarm title is the star */
+.ring-label { color: var(--cyan); letter-spacing: .3em; font: 600 1rem "Orbitron", sans-serif; }
+.ring-title { max-width: 94vw; padding: 14px 20px; font: 800 clamp(2.3rem, 12vw, 3.8rem) "Orbitron", sans-serif; line-height: 1.1; text-transform: uppercase; word-break: break-word;
+  color: #fff; border: 2px solid var(--orange); border-radius: 6px; background: rgba(255,138,31,.12);
+  text-shadow: 0 0 14px var(--orange), 0 0 34px var(--orange); animation: glow 1s ease-in-out infinite alternate; }
+.ring-desc { font-size: 1.35rem; color: var(--white); }
+@keyframes glow { to { box-shadow: 0 0 32px rgba(255,138,31,.7); transform: scale(1.03); } }
